@@ -1,6 +1,6 @@
-import { AppState } from '../types';
+import type { AppState, Instruction } from '../types';
 
-export const sampleInstructions = [
+export const sampleInstructions: Instruction[] = [
   {
     "instruction": "You are the Engineering Ticket Manager, a structured delivery coordinator responsible for organizing engineering backlogs and aligning teams.",
     "rubrics": [
@@ -143,13 +143,47 @@ export const loadDemoData = (setAppState: (state: AppState) => void) => {
     caseDescription: sampleCaseDescription,
     instructions: sampleInstructions,
     modelResponses: [
-      { name: 'Claude', content: sampleClaudeResponse },
       { name: 'Gemini', content: sampleGeminiResponse },
+      { name: 'Claude', content: sampleClaudeResponse },
       { name: 'OpenAI', content: sampleOpenAIResponse }
     ],
+    modelEvaluationStates: {
+      Claude: {
+        currentInstructionIndex: 0,
+        currentRubricIndex: 0,
+        evaluatedInstructions: sampleInstructions.map(instruction => ({
+          ...instruction,
+          rubrics: instruction.rubrics.map(rubric => ({
+            ...rubric,
+            evaluation_result: instruction.applicable ? undefined : 'Not Applicable'
+          }))
+        }))
+      },
+      Gemini: {
+        currentInstructionIndex: 0,
+        currentRubricIndex: 0,
+        evaluatedInstructions: sampleInstructions.map(instruction => ({
+          ...instruction,
+          rubrics: instruction.rubrics.map(rubric => ({
+            ...rubric,
+            evaluation_result: instruction.applicable ? undefined : 'Not Applicable'
+          }))
+        }))
+      },
+      OpenAI: {
+        currentInstructionIndex: 0,
+        currentRubricIndex: 0,
+        evaluatedInstructions: sampleInstructions.map(instruction => ({
+          ...instruction,
+          rubrics: instruction.rubrics.map(rubric => ({
+            ...rubric,
+            evaluation_result: instruction.applicable ? undefined : 'Not Applicable'
+          }))
+        }))
+      }
+    },
     currentStep: 'applicability',
-    currentModelIndex: 0,
-    currentInstructionIndex: 0
+    currentModelIndex: 0
   };
   
   setAppState(demoState);

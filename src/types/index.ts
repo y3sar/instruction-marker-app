@@ -17,12 +17,22 @@ export interface ModelResponse {
   content: string;
 }
 
+export interface ModelEvaluationState {
+  currentInstructionIndex: number;
+  currentRubricIndex: number;
+  evaluatedInstructions: Instruction[];
+}
+
 export interface AppState {
   query: string;
   caseDescription: string;
   instructions: Instruction[];
   modelResponses: ModelResponse[];
+  modelEvaluationStates: {
+    Claude: ModelEvaluationState;
+    Gemini: ModelEvaluationState;
+    OpenAI: ModelEvaluationState;
+  };
   currentStep: 'applicability' | 'evaluation';
   currentModelIndex: number;
-  currentInstructionIndex: number;
 }

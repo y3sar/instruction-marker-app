@@ -1,14 +1,16 @@
 import { useState } from 'react';
-import { AppState, Instruction } from '../types';
+import type { AppState, Instruction } from '../types';
 
 interface ApplicabilityStepProps {
   appState: AppState;
   setAppState: (state: AppState) => void;
   updateInstructions: (instructions: Instruction[]) => void;
   onNext: () => void;
+  onStartTimer: () => void;
+  timerActive: boolean;
 }
 
-const ApplicabilityStep = ({ appState, setAppState, updateInstructions, onNext }: ApplicabilityStepProps) => {
+const ApplicabilityStep = ({ appState, setAppState, updateInstructions, onNext, onStartTimer, timerActive }: ApplicabilityStepProps) => {
   const [query, setQuery] = useState(appState.query);
   const [caseDescription, setCaseDescription] = useState(appState.caseDescription);
   const [instructionsJson, setInstructionsJson] = useState('');
@@ -22,6 +24,11 @@ const ApplicabilityStep = ({ appState, setAppState, updateInstructions, onNext }
       if (Array.isArray(parsed)) {
         setParsedInstructions(parsed);
         setError('');
+        
+        // Start timer when instructions are successfully parsed
+        if (!timerActive) {
+          onStartTimer();
+        }
       } else {
         setError('Instructions must be an array');
       }
@@ -43,13 +50,41 @@ const ApplicabilityStep = ({ appState, setAppState, updateInstructions, onNext }
       return;
     }
 
-    // Update app state
-    setAppState({
+    // Initialize evaluation states for all models
+    const initializedInstructions = parsedInstructions.map(instruction => ({
+      ...instruction,
+      rubrics: instruction.rubrics.map(rubric => ({
+        ...rubric,
+        evaluation_result: instruction.applicable ? undefined : ('Not Applicable' as const)
+      }))
+    }));
+
+    // Update app state with proper initialization
+    const updatedAppState = {
       ...appState,
       query,
       caseDescription,
-      instructions: parsedInstructions
-    });
+      instructions: parsedInstructions,
+      modelEvaluationStates: {
+        Claude: {
+          currentInstructionIndex: 0,
+          currentRubricIndex: 0,
+          evaluatedInstructions: initializedInstructions
+        },
+        Gemini: {
+          currentInstructionIndex: 0,
+          currentRubricIndex: 0,
+          evaluatedInstructions: initializedInstructions
+        },
+        OpenAI: {
+          currentInstructionIndex: 0,
+          currentRubricIndex: 0,
+          evaluatedInstructions: initializedInstructions
+        }
+      }
+    };
+
+    setAppState(updatedAppState);
     updateInstructions(parsedInstructions);
     onNext();
   };
@@ -111,9 +146,17 @@ const ApplicabilityStep = ({ appState, setAppState, updateInstructions, onNext }
       {/* Applicability Marking */}
       {parsedInstructions.length > 0 && (
         <div className="bg-white rounded-lg shadow-sm p-6">
-          <h2 className="text-xl font-semibold mb-4">
-            Mark Applicability ({currentInstructionIndex + 1} of {parsedInstructions.length})
-          </h2>
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-xl font-semibold">
+              Mark Applicability ({currentInstructionIndex + 1} of {parsedInstructions.length})
+            </h2>
+            {timerActive && (
+              <div className="flex items-center space-x-2">
+                <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
+                <span className="text-sm text-green-600 font-medium">Timer Active</span>
+              </div>
+            )}
+          </div>
 
           <div className="space-y-4">
             <div className="bg-gray-50 p-4 rounded-md">
@@ -127,6 +170,23 @@ const ApplicabilityStep = ({ appState, setAppState, updateInstructions, onNext }
             <div className="border border-gray-200 p-4 rounded-md">
               <h3 className="font-medium text-gray-900 mb-2">Current Instruction</h3>
               <p className="text-sm text-gray-700 mb-3">{currentInstruction.instruction}</p>
+              
+              {/* Show rubrics */}
+              <div className="mb-4">
+                <h4 className="font-medium text-gray-800 mb-2">Rubrics ({currentInstruction.rubrics.length}):</h4>
+                <div className="space-y-2">
+                  {currentInstruction.rubrics.map((rubric, rubricIndex) => (
+                    <div key={rubricIndex} className="bg-gray-50 p-3 rounded border-l-4 border-gray-300">
+                      <p className="text-sm text-gray-700 mb-1">
+                        <strong>Rubric {rubricIndex + 1}:</strong> {rubric.rubric}
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        <strong>Verifier:</strong> {rubric.rubric_verifier}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
               
               <div className="flex items-center space-x-4">
                 <label className="flex items-center">
