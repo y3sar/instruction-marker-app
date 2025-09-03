@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { AppState, Instruction } from '../types';
+import type { AppState } from '../types';
 
 interface ResultsStepProps {
   appState: AppState;
@@ -8,10 +8,11 @@ interface ResultsStepProps {
 
 const ResultsStep = ({ appState, updateModelEvaluationState }: ResultsStepProps) => {
   const [copied, setCopied] = useState<string | null>(null);
-  const [importJson, setImportJson] = useState('');
+  const [importJsonGemini, setImportJsonGemini] = useState('');
+  const [importJsonClaude, setImportJsonClaude] = useState('');
+  const [importJsonOpenAI, setImportJsonOpenAI] = useState('');
   const [importError, setImportError] = useState('');
   const [importSuccess, setImportSuccess] = useState('');
-  const [importModel, setImportModel] = useState<'Claude' | 'Gemini' | 'OpenAI'>('Gemini');
 
   const copyToClipboard = async (text: string, label: string) => {
     try {
@@ -23,85 +24,148 @@ const ResultsStep = ({ appState, updateModelEvaluationState }: ResultsStepProps)
     }
   };
 
-  const validateAndImportEvaluation = () => {
+  const validateAndImportEvaluationFor = (modelName: 'Claude' | 'Gemini' | 'OpenAI', raw: string) => {
     try {
-      const importedData = JSON.parse(importJson);
+      const importedData = JSON.parse(raw);
       
-      // Basic validation
       if (!Array.isArray(importedData)) {
         setImportError('Evaluation JSON must be an array of instructions');
+        setImportSuccess('');
         return;
       }
 
-      // Check if the number of instructions matches
       if (importedData.length !== appState.instructions.length) {
         setImportError(`Instruction count mismatch. Expected ${appState.instructions.length}, got ${importedData.length}`);
+        setImportSuccess('');
         return;
       }
 
-      // Validate each instruction
+      // Check for mismatches and collect them
+      const mismatches: Array<{instructionIndex: number, instruction: string, field: string, finalValue: any, importedValue: any}> = [];
+      const autoCorrections: Array<{instructionIndex: number, instruction: string, field: string, oldValue: any, newValue: any}> = [];
+
       for (let i = 0; i < importedData.length; i++) {
         const importedInstruction = importedData[i];
         const originalInstruction = appState.instructions[i];
 
-        // Check instruction text matches
         if (importedInstruction.instruction !== originalInstruction.instruction) {
           setImportError(`Instruction ${i + 1} text mismatch`);
+          setImportSuccess('');
           return;
         }
 
-        // Check applicability matches
+        if (typeof importedInstruction.applicable !== 'boolean') {
+          setImportError(`Instruction ${i + 1} has invalid applicability (must be boolean)`);
+          setImportSuccess('');
+          return;
+        }
+
+        if (!['BUSINESS_LOGIC_DEVELOPER_INSTRUCTIONS','EXPERT_DEVELOPER_INSTRUCTIONS'].includes(importedInstruction.type)) {
+          setImportError(`Instruction ${i + 1} has invalid type`);
+          setImportSuccess('');
+          return;
+        }
+
+        // Auto-correct applicability mismatches
         if (importedInstruction.applicable !== originalInstruction.applicable) {
-          setImportError(`Instruction ${i + 1} applicability mismatch. Expected ${originalInstruction.applicable}, got ${importedInstruction.applicable}`);
+          const oldApplicable = importedInstruction.applicable;
+          const newApplicable = originalInstruction.applicable;
+          
+          // Update the imported instruction to match Final Instruction
+          importedInstruction.applicable = newApplicable;
+          
+          // If Final Instruction is false, set all rubrics to "Not Applicable"
+          if (newApplicable === false) {
+            importedInstruction.rubrics.forEach((rubric: any) => {
+              rubric.evaluation_result = 'Not Applicable';
+            });
+          }
+          
+          autoCorrections.push({
+            instructionIndex: i,
+            instruction: importedInstruction.instruction.substring(0, 50) + '...',
+            field: 'applicable',
+            oldValue: oldApplicable,
+            newValue: newApplicable
+          });
+        }
+
+        // Check for type mismatch (no auto-correction, just notification)
+        if (importedInstruction.type !== originalInstruction.type) {
+          mismatches.push({
+            instructionIndex: i,
+            instruction: importedInstruction.instruction.substring(0, 50) + '...',
+            field: 'type',
+            finalValue: originalInstruction.type,
+            importedValue: importedInstruction.type
+          });
+        }
+
+        if (!Array.isArray(importedInstruction.rubrics)) {
+          setImportError(`Instruction ${i + 1} rubrics must be an array`);
+          setImportSuccess('');
           return;
         }
 
-        // Check rubrics count matches
         if (importedInstruction.rubrics.length !== originalInstruction.rubrics.length) {
           setImportError(`Instruction ${i + 1} rubric count mismatch. Expected ${originalInstruction.rubrics.length}, got ${importedInstruction.rubrics.length}`);
+          setImportSuccess('');
           return;
         }
 
-        // Check each rubric
         for (let j = 0; j < importedInstruction.rubrics.length; j++) {
           const importedRubric = importedInstruction.rubrics[j];
           const originalRubric = originalInstruction.rubrics[j];
 
           if (importedRubric.rubric !== originalRubric.rubric) {
             setImportError(`Instruction ${i + 1}, Rubric ${j + 1} text mismatch`);
+            setImportSuccess('');
             return;
           }
 
           if (importedRubric.rubric_verifier !== originalRubric.rubric_verifier) {
             setImportError(`Instruction ${i + 1}, Rubric ${j + 1} verifier mismatch`);
+            setImportSuccess('');
             return;
           }
 
-          // Validate evaluation_result
-          if (importedRubric.evaluation_result && 
-              !['Yes', 'No', 'Not Applicable'].includes(importedRubric.evaluation_result)) {
-            setImportError(`Instruction ${i + 1}, Rubric ${j + 1} has invalid evaluation_result: ${importedRubric.evaluation_result}`);
+          if (
+            importedRubric.evaluation_result !== undefined &&
+            !['Yes','No','Not Applicable'].includes(importedRubric.evaluation_result)
+          ) {
+            setImportError(`Instruction ${i + 1}, Rubric ${j + 1} invalid evaluation_result`);
+            setImportSuccess('');
             return;
           }
         }
       }
 
-      // If validation passes, update the selected model state
-      updateModelEvaluationState(importModel, {
+      updateModelEvaluationState(modelName, {
         currentInstructionIndex: 0,
         currentRubricIndex: 0,
         evaluatedInstructions: importedData
       });
 
-      setImportSuccess(`Evaluation data imported successfully for ${importModel}! The evaluation state has been updated.`);
       setImportError('');
-      setImportJson('');
       
-      // Clear success message after 5 seconds
-      setTimeout(() => setImportSuccess(''), 5000);
-
+      // Build success message with auto-corrections and remaining mismatches
+      let successMessage = `Imported evaluation for ${modelName}`;
+      
+      if (autoCorrections.length > 0) {
+        successMessage += `. Auto-corrected ${autoCorrections.length} applicability mismatch(es)`;
+      }
+      
+      if (mismatches.length > 0) {
+        successMessage += ` with ${mismatches.length} type mismatch(es) to resolve`;
+      }
+      
+      successMessage += '. Review in Evaluation tab.';
+      
+      setImportSuccess(successMessage);
+      setTimeout(() => setImportSuccess(''), 8000); // Show longer for auto-corrections
     } catch (err) {
       setImportError('Invalid JSON format');
+      setImportSuccess('');
     }
   };
 
@@ -128,7 +192,6 @@ const ResultsStep = ({ appState, updateModelEvaluationState }: ResultsStepProps)
   const totalInstructions = appState.instructions.length;
   const totalRubrics = applicableInstructions.reduce((sum, instruction) => sum + instruction.rubrics.length, 0);
   
-  // Calculate completed rubrics for each model
   const getCompletedRubrics = (modelName: 'Claude' | 'Gemini' | 'OpenAI') => {
     const modelState = appState.modelEvaluationStates[modelName];
     const instructions = modelState.evaluatedInstructions.length > 0 
@@ -142,76 +205,82 @@ const ResultsStep = ({ appState, updateModelEvaluationState }: ResultsStepProps)
 
   return (
     <div className="space-y-6">
-      {/* Import Evaluation JSON */}
+      {/* Import Evaluation JSON - per model */}
       <div className="bg-white rounded-lg shadow-sm p-6">
-        <h2 className="text-xl font-semibold mb-4">Import Evaluation JSON</h2>
+        <h2 className="text-xl font-semibold mb-4">Import Evaluation JSONs</h2>
         <p className="text-sm text-gray-600 mb-4">
-          Paste an evaluation JSON to automatically populate all model evaluation states. 
-          The JSON will be validated against the current instructions and applicability settings.
+          Paste evaluated instruction JSONs for each model below. We'll validate against the Final Instructions and auto-populate the Evaluation tab.
         </p>
-        
-        <div className="space-y-4">
-          <div className="flex space-x-4">
-            <div className="flex-1">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Evaluation JSON
-              </label>
-              <textarea
-                value={importJson}
-                onChange={(e) => setImportJson(e.target.value)}
-                className="w-full h-32 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
-                placeholder="Paste evaluation JSON here..."
-              />
-            </div>
-            <div className="w-48">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Target Model
-              </label>
-              <select
-                value={importModel}
-                onChange={(e) => setImportModel(e.target.value as 'Claude' | 'Gemini' | 'OpenAI')}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="Gemini">Gemini</option>
-                <option value="Claude">Claude</option>
-                <option value="OpenAI">OpenAI</option>
-              </select>
-            </div>
-          </div>
-          
-          <div className="flex space-x-2">
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* Gemini */}
+          <div className="border border-gray-200 rounded-lg p-4">
+            <h3 className="font-medium mb-2">Gemini</h3>
+            <textarea
+              value={importJsonGemini}
+              onChange={(e) => setImportJsonGemini(e.target.value)}
+              className="w-full h-40 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-xs"
+              placeholder="Paste Gemini evaluated JSON here..."
+            />
             <button
-              onClick={validateAndImportEvaluation}
-              className="px-4 py-2 bg-green-500 text-white rounded-md hover:bg-green-600 transition-colors"
+              onClick={() => validateAndImportEvaluationFor('Gemini', importJsonGemini)}
+              className="mt-2 w-full px-3 py-2 bg-green-500 text-white rounded-md hover:bg-green-600"
             >
-              Import & Validate
-            </button>
-            <button
-              onClick={() => {
-                setImportJson('');
-                setImportError('');
-                setImportSuccess('');
-              }}
-              className="px-4 py-2 bg-gray-500 text-white rounded-md hover:bg-gray-600 transition-colors"
-            >
-              Clear
+              Import Gemini
             </button>
           </div>
-          
-          {importError && (
-            <div className="bg-red-50 border border-red-200 rounded-md p-3">
-              <p className="text-red-700 text-sm font-medium">Validation Error:</p>
-              <p className="text-red-600 text-sm">{importError}</p>
-            </div>
-          )}
-          
-          {importSuccess && (
-            <div className="bg-green-50 border border-green-200 rounded-md p-3">
-              <p className="text-green-700 text-sm font-medium">Success:</p>
-              <p className="text-green-600 text-sm">{importSuccess}</p>
-            </div>
-          )}
+
+          {/* Claude */}
+          <div className="border border-gray-200 rounded-lg p-4">
+            <h3 className="font-medium mb-2">Claude</h3>
+            <textarea
+              value={importJsonClaude}
+              onChange={(e) => setImportJsonClaude(e.target.value)}
+              className="w-full h-40 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-xs"
+              placeholder="Paste Claude evaluated JSON here..."
+            />
+            <button
+              onClick={() => validateAndImportEvaluationFor('Claude', importJsonClaude)}
+              className="mt-2 w-full px-3 py-2 bg-green-500 text-white rounded-md hover:bg-green-600"
+            >
+              Import Claude
+            </button>
+          </div>
+
+          {/* OpenAI */}
+          <div className="border border-gray-200 rounded-lg p-4">
+            <h3 className="font-medium mb-2">OpenAI</h3>
+            <textarea
+              value={importJsonOpenAI}
+              onChange={(e) => setImportJsonOpenAI(e.target.value)}
+              className="w-full h-40 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-xs"
+              placeholder="Paste OpenAI evaluated JSON here..."
+            />
+            <button
+              onClick={() => validateAndImportEvaluationFor('OpenAI', importJsonOpenAI)}
+              className="mt-2 w-full px-3 py-2 bg-green-500 text-white rounded-md hover:bg-green-600"
+            >
+              Import OpenAI
+            </button>
+          </div>
         </div>
+
+        {(importError || importSuccess) && (
+          <div className="mt-4">
+            {importError && (
+              <div className="bg-red-50 border border-red-200 rounded-md p-3 mb-2">
+                <p className="text-red-700 text-sm font-medium">Validation Error:</p>
+                <p className="text-red-600 text-sm">{importError}</p>
+              </div>
+            )}
+            {importSuccess && (
+              <div className="bg-green-50 border border-green-200 rounded-md p-3">
+                <p className="text-green-700 text-sm font-medium">Success:</p>
+                <p className="text-green-600 text-sm">{importSuccess}</p>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Summary */}
@@ -299,56 +368,6 @@ const ResultsStep = ({ appState, updateModelEvaluationState }: ResultsStepProps)
               <pre className="bg-gray-50 p-3 rounded text-xs overflow-x-auto max-h-32">
                 {generateEvaluatedInstructionsJson(modelName)}
               </pre>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Progress Tracking */}
-      <div className="bg-white rounded-lg shadow-sm p-6">
-        <h2 className="text-xl font-semibold mb-4">Progress Tracking</h2>
-        
-        <div className="space-y-3">
-          {appState.instructions.map((instruction, index) => (
-            <div key={index} className="border border-gray-200 rounded-lg p-3">
-              <div className="flex justify-between items-start mb-2">
-                <div className="flex-1">
-                  <p className="text-sm font-medium text-gray-900">
-                    Instruction {index + 1}: {instruction.instruction.substring(0, 100)}...
-                  </p>
-                  <div className="flex items-center space-x-4 mt-1">
-                    <span className={`px-2 py-1 text-xs rounded ${
-                      instruction.applicable 
-                        ? 'bg-green-100 text-green-800' 
-                        : 'bg-gray-100 text-gray-800'
-                    }`}>
-                      {instruction.applicable ? 'Applicable' : 'Not Applicable'}
-                    </span>
-                    <span className="text-xs text-gray-500">{instruction.type}</span>
-                  </div>
-                </div>
-              </div>
-              
-              {instruction.applicable && (
-                <div className="space-y-1">
-                  {instruction.rubrics.map((rubric, rubricIndex) => (
-                    <div key={rubricIndex} className="flex items-center space-x-2 text-xs">
-                      <span className="text-gray-500">Rubric {rubricIndex + 1}:</span>
-                      <span className={`px-2 py-1 rounded ${
-                        rubric.evaluation_result === 'Yes' 
-                          ? 'bg-green-100 text-green-800'
-                          : rubric.evaluation_result === 'No'
-                          ? 'bg-red-100 text-red-800'
-                          : rubric.evaluation_result === 'Not Applicable'
-                          ? 'bg-gray-100 text-gray-800'
-                          : 'bg-yellow-100 text-yellow-800'
-                      }`}>
-                        {rubric.evaluation_result || 'Not Evaluated'}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
             </div>
           ))}
         </div>

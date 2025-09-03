@@ -27,23 +27,78 @@ const EvaluationStep = ({
   const applicableInstructions = appState.instructions.filter(instruction => instruction.applicable);
   const currentInstruction = applicableInstructions[currentModelState.currentInstructionIndex];
   
-  // Get the current rubric from evaluated instructions, fallback to original instructions if needed
-  const currentEvaluatedInstruction = currentModelState.evaluatedInstructions.find(instruction => 
+  // In order to compare/edit we need the actual index into the full instructions array
+  const actualInstructionIndex = appState.instructions.findIndex(instruction => 
     instruction.instruction === currentInstruction?.instruction
   );
+
+  // Get the current rubric from evaluated instructions, fallback to original instructions if needed
+  const currentEvaluatedInstruction = currentModelState.evaluatedInstructions.find(instruction => 
+    instruction?.instruction === currentInstruction?.instruction
+  );
   
-  // If no evaluated instruction found, use the original instruction
   const instructionToUse = currentEvaluatedInstruction || currentInstruction;
   const currentRubric = instructionToUse?.rubrics[currentModelState.currentRubricIndex];
 
-  const updateEvaluationResult = (instructionIndex: number, rubricIndex: number, result: 'Yes' | 'No' | 'Not Applicable') => {
-    // Find the actual index in the full instructions array
-    const actualInstructionIndex = appState.instructions.findIndex(instruction => 
-      instruction === applicableInstructions[instructionIndex]
+  // Mismatch detection (applicability/type) between imported evaluation and Final Instructions
+  const baseInstruction = actualInstructionIndex >= 0 ? appState.instructions[actualInstructionIndex] : undefined;
+  
+  // Only check for mismatches if we have imported evaluation data (not just the default state)
+  const hasImportedEvaluationData = currentModelState.evaluatedInstructions.length > 0 && 
+    currentModelState.evaluatedInstructions.some(instruction => 
+      instruction.rubrics.some(rubric => rubric.evaluation_result !== undefined)
     );
+  
+  // Only check for type mismatches since applicability is auto-corrected
+  const hasTypeMismatch = hasImportedEvaluationData && baseInstruction && instructionToUse && 
+    baseInstruction.type !== instructionToUse.type;
+
+  // Find all instructions with type mismatches to show them in evaluation
+  const instructionsWithMismatches = hasImportedEvaluationData ? 
+    appState.instructions.filter((instruction, index) => {
+      const evaluatedInstruction = currentModelState.evaluatedInstructions[index];
+      return evaluatedInstruction && instruction.type !== evaluatedInstruction.type;
+    }) : [];
+
+  // Show mismatched instructions first, then applicable instructions
+  const instructionsToShow = [...instructionsWithMismatches, ...applicableInstructions.filter(instruction => 
+    !instructionsWithMismatches.some(mismatched => mismatched.instruction === instruction.instruction)
+  )];
+  
+  const currentInstructionToShow = instructionsToShow[currentModelState.currentInstructionIndex];
+  
+  // Update actual instruction index for the current instruction being shown
+  const actualInstructionIndexToShow = appState.instructions.findIndex(instruction => 
+    instruction.instruction === currentInstructionToShow?.instruction
+  );
+  
+  // Get the current rubric from evaluated instructions for the instruction being shown
+  const currentEvaluatedInstructionToShow = currentModelState.evaluatedInstructions.find(instruction => 
+    instruction?.instruction === currentInstructionToShow?.instruction
+  );
+  
+  const instructionToUseToShow = currentEvaluatedInstructionToShow || currentInstructionToShow;
+  const currentRubricToShow = instructionToUseToShow?.rubrics[currentModelState.currentRubricIndex];
+
+  // Mismatch detection for the instruction being shown (only type mismatches)
+  const baseInstructionToShow = actualInstructionIndexToShow >= 0 ? appState.instructions[actualInstructionIndexToShow] : undefined;
+  const hasTypeMismatchToShow = hasImportedEvaluationData && baseInstructionToShow && instructionToUseToShow && 
+    baseInstructionToShow.type !== instructionToUseToShow.type;
+
+  const updateBaseInstructionField = (idx: number, updates: Partial<Pick<Instruction,'applicable'|'type'>>) => {
+    const nextInstructions = appState.instructions.map((instr, i) => 
+      i === idx ? { ...instr, ...updates } : instr
+    );
+    setAppState({ ...appState, instructions: nextInstructions });
+  };
+
+  const updateEvaluationResult = (instructionIndex: number, rubricIndex: number, result: 'Yes' | 'No' | 'Not Applicable') => {
+    // Map instructionIndex within instructionsToShow to actual index in full instructions
+    const targetInstruction = instructionsToShow[instructionIndex];
+    const actualIndex = appState.instructions.findIndex(ins => ins.instruction === targetInstruction.instruction);
     
     const updatedEvaluatedInstructions = currentModelState.evaluatedInstructions.map((instruction, i) => {
-      if (i === actualInstructionIndex) {
+      if (i === actualIndex) {
         const updatedRubrics = instruction.rubrics.map((rubric, j) => 
           j === rubricIndex ? { ...rubric, evaluation_result: result } : rubric
         );
@@ -58,11 +113,11 @@ const EvaluationStep = ({
   };
 
   const nextRubric = () => {
-    if (currentModelState.currentRubricIndex < currentInstruction.rubrics.length - 1) {
+    if (currentInstructionToShow && currentModelState.currentRubricIndex < currentInstructionToShow.rubrics.length - 1) {
       updateModelEvaluationState(currentModelName, {
         currentRubricIndex: currentModelState.currentRubricIndex + 1
       });
-    } else if (currentModelState.currentInstructionIndex < applicableInstructions.length - 1) {
+    } else if (currentModelState.currentInstructionIndex < instructionsToShow.length - 1) {
       updateModelEvaluationState(currentModelName, {
         currentInstructionIndex: currentModelState.currentInstructionIndex + 1,
         currentRubricIndex: 0
@@ -76,15 +131,15 @@ const EvaluationStep = ({
         currentRubricIndex: currentModelState.currentRubricIndex - 1
       });
     } else if (currentModelState.currentInstructionIndex > 0) {
+      const prevInstruction = instructionsToShow[currentModelState.currentInstructionIndex - 1];
       updateModelEvaluationState(currentModelName, {
         currentInstructionIndex: currentModelState.currentInstructionIndex - 1,
-        currentRubricIndex: applicableInstructions[currentModelState.currentInstructionIndex - 1].rubrics.length - 1
+        currentRubricIndex: prevInstruction.rubrics.length - 1
       });
     }
   };
 
   const formatModelResponse = (content: string) => {
-    // Simple formatting for the model response
     return content.split('\n').map((line, index) => (
       <div key={index} className="mb-1">
         {line.startsWith('###') ? (
@@ -106,16 +161,16 @@ const EvaluationStep = ({
     ));
   };
 
-  if (applicableInstructions.length === 0) {
+  if (instructionsToShow.length === 0) {
     return (
       <div className="bg-white rounded-lg shadow-sm p-6">
         <h2 className="text-xl font-semibold mb-4">Evaluation</h2>
-        <p className="text-gray-600">No applicable instructions found. Please complete the applicability step first.</p>
+        <p className="text-gray-600">No instructions to evaluate. Please complete the applicability step first.</p>
       </div>
     );
   }
 
-  if (!currentInstruction || !currentRubric) {
+  if (!currentInstructionToShow || !currentRubricToShow) {
     return (
       <div className="bg-white rounded-lg shadow-sm p-6">
         <h2 className="text-xl font-semibold mb-4">Evaluation</h2>
@@ -176,31 +231,69 @@ const EvaluationStep = ({
         {/* Evaluation Panel */}
         <div className="bg-white rounded-lg shadow-sm p-6">
           <h3 className="text-lg font-semibold mb-4">
-            {currentModel.name} Evaluation ({currentModelState.currentInstructionIndex + 1} of {applicableInstructions.length})
+            {currentModel.name} Evaluation ({currentModelState.currentInstructionIndex + 1} of {instructionsToShow.length})
           </h3>
 
           <div className="space-y-4">
-            <div className="bg-gray-50 p-4 rounded-md">
-              <h4 className="font-medium text-gray-900 mb-2">Current Instruction</h4>
-              <p className="text-sm text-gray-700">{currentInstruction.instruction}</p>
-              <div className="mt-2 text-xs text-gray-500">
-                <p><strong>Type:</strong> {currentInstruction.type}</p>
-                <p><strong>Labels:</strong> {currentInstruction.labels.join(', ')}</p>
+            <div className={`p-4 rounded-md ${hasTypeMismatchToShow ? 'border border-red-300 bg-red-50' : 'bg-gray-50'}`}>
+              <div className="flex items-start justify-between">
+                <div>
+                  <h4 className="font-medium text-gray-900 mb-2">Current Instruction</h4>
+                  <p className="text-sm text-gray-700">{currentInstructionToShow.instruction}</p>
+                  <div className="mt-2 text-xs text-gray-500">
+                    <p><strong>Type:</strong> {baseInstructionToShow?.type}</p>
+                    <p><strong>Labels:</strong> {currentInstructionToShow.labels.join(', ')}</p>
+                    <p><strong>Applicable:</strong> {String(baseInstructionToShow?.applicable)}</p>
+                  </div>
+                </div>
+
+                {hasTypeMismatchToShow && baseInstructionToShow && instructionToUseToShow && (
+                  <div className="ml-4 w-80">
+                    <div className="text-sm font-medium text-red-700 mb-3">Mismatch detected - Choose which value to keep:</div>
+                    
+                    {/* Type Radio Buttons */}
+                    <div className="p-3 border border-red-200 rounded bg-red-50">
+                      <div className="text-sm font-medium text-red-800 mb-2">Type:</div>
+                      <div className="space-y-2">
+                        <label className="flex items-center">
+                          <input
+                            type="radio"
+                            name={`type-${actualInstructionIndexToShow}`}
+                            checked={baseInstructionToShow.type === 'BUSINESS_LOGIC_DEVELOPER_INSTRUCTIONS'}
+                            onChange={() => updateBaseInstructionField(actualInstructionIndexToShow, { type: 'BUSINESS_LOGIC_DEVELOPER_INSTRUCTIONS' })}
+                            className="mr-2"
+                          />
+                          <span className="text-sm">Final Instruction Type: <strong>BUSINESS_LOGIC_DEVELOPER_INSTRUCTIONS</strong></span>
+                        </label>
+                        <label className="flex items-center">
+                          <input
+                            type="radio"
+                            name={`type-${actualInstructionIndexToShow}`}
+                            checked={baseInstructionToShow.type === 'EXPERT_DEVELOPER_INSTRUCTIONS'}
+                            onChange={() => updateBaseInstructionField(actualInstructionIndexToShow, { type: 'EXPERT_DEVELOPER_INSTRUCTIONS' })}
+                            className="mr-2"
+                          />
+                          <span className="text-sm">Evaluation JSON Type: <strong>{instructionToUseToShow.type}</strong></span>
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
             <div className="border border-gray-200 p-4 rounded-md">
               <h4 className="font-medium text-gray-900 mb-2">
-                Rubric {currentModelState.currentRubricIndex + 1} of {currentInstruction.rubrics.length}
+                Rubric {currentModelState.currentRubricIndex + 1} of {currentInstructionToShow.rubrics.length}
               </h4>
-              <p className="text-sm text-gray-700 mb-3">{currentRubric.rubric}</p>
+              <p className="text-sm text-gray-700 mb-3">{currentRubricToShow.rubric}</p>
               
               <div className="space-y-2">
                 <label className="flex items-center">
                   <input
                     type="radio"
                     name={`evaluation-${currentModelName}-${currentModelState.currentInstructionIndex}-${currentModelState.currentRubricIndex}`}
-                    checked={currentRubric.evaluation_result === 'Yes'}
+                    checked={currentRubricToShow.evaluation_result === 'Yes'}
                     onChange={() => updateEvaluationResult(currentModelState.currentInstructionIndex, currentModelState.currentRubricIndex, 'Yes')}
                     className="mr-2"
                   />
@@ -210,7 +303,7 @@ const EvaluationStep = ({
                   <input
                     type="radio"
                     name={`evaluation-${currentModelName}-${currentModelState.currentInstructionIndex}-${currentModelState.currentRubricIndex}`}
-                    checked={currentRubric.evaluation_result === 'No'}
+                    checked={currentRubricToShow.evaluation_result === 'No'}
                     onChange={() => updateEvaluationResult(currentModelState.currentInstructionIndex, currentModelState.currentRubricIndex, 'No')}
                     className="mr-2"
                   />
@@ -220,7 +313,7 @@ const EvaluationStep = ({
                   <input
                     type="radio"
                     name={`evaluation-${currentModelName}-${currentModelState.currentInstructionIndex}-${currentModelState.currentRubricIndex}`}
-                    checked={currentRubric.evaluation_result === 'Not Applicable'}
+                    checked={currentRubricToShow.evaluation_result === 'Not Applicable'}
                     onChange={() => updateEvaluationResult(currentModelState.currentInstructionIndex, currentModelState.currentRubricIndex, 'Not Applicable')}
                     className="mr-2"
                   />
@@ -229,7 +322,7 @@ const EvaluationStep = ({
               </div>
 
               <div className="mt-3 text-xs text-gray-500">
-                <p><strong>Verifier:</strong> {currentRubric.rubric_verifier}</p>
+                <p><strong>Verifier:</strong> {currentRubricToShow.rubric_verifier}</p>
               </div>
             </div>
 
@@ -244,7 +337,7 @@ const EvaluationStep = ({
               
               <button
                 onClick={nextRubric}
-                disabled={currentModelState.currentInstructionIndex === applicableInstructions.length - 1 && currentModelState.currentRubricIndex === currentInstruction.rubrics.length - 1}
+                disabled={currentModelState.currentInstructionIndex === instructionsToShow.length - 1 && currentModelState.currentRubricIndex === currentInstructionToShow.rubrics.length - 1}
                 className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Next

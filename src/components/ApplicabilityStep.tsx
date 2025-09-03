@@ -211,6 +211,33 @@ const ApplicabilityStep = ({ appState, setAppState, updateInstructions, onNext, 
                 </label>
               </div>
 
+              {/* User Confirmation Checkbox */}
+              <div className="mt-4">
+                <label className="flex items-center">
+                  <input
+                    type="checkbox"
+                    checked={currentInstruction.labels.includes('User Confirmation')}
+                    onChange={(e) => {
+                      const updated = parsedInstructions.map((instruction, i) => {
+                        if (i === currentInstructionIndex) {
+                          const newLabels = e.target.checked
+                            ? [...instruction.labels, 'User Confirmation']
+                            : instruction.labels.filter(label => label !== 'User Confirmation');
+                          return { ...instruction, labels: newLabels };
+                        }
+                        return instruction;
+                      });
+                      setParsedInstructions(updated);
+                    }}
+                    className="mr-2"
+                  />
+                  <span className="text-sm font-medium text-gray-700">User Confirmation</span>
+                </label>
+                <p className="text-xs text-gray-500 mt-1">
+                  Check this box to add "User Confirmation" to the instruction labels
+                </p>
+              </div>
+
               <div className="mt-3 text-xs text-gray-500">
                 <p><strong>Type:</strong> {currentInstruction.type}</p>
                 <p><strong>Labels:</strong> {currentInstruction.labels.join(', ')}</p>
