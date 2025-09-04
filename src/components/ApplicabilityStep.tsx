@@ -22,7 +22,13 @@ const ApplicabilityStep = ({ appState, setAppState, updateInstructions, onNext, 
     try {
       const parsed = JSON.parse(instructionsJson);
       if (Array.isArray(parsed)) {
-        setParsedInstructions(parsed);
+        // Ensure each instruction has a type, defaulting to BUSINESS_LOGIC_DEVELOPER_INSTRUCTIONS if not present
+        const instructionsWithType = parsed.map(instruction => ({
+          ...instruction,
+          type: instruction.type || 'BUSINESS_LOGIC_DEVELOPER_INSTRUCTIONS'
+        }));
+        
+        setParsedInstructions(instructionsWithType);
         setError('');
         
         // Start timer when instructions are successfully parsed
@@ -40,6 +46,13 @@ const ApplicabilityStep = ({ appState, setAppState, updateInstructions, onNext, 
   const updateApplicability = (index: number, applicable: boolean) => {
     const updated = parsedInstructions.map((instruction, i) => 
       i === index ? { ...instruction, applicable } : instruction
+    );
+    setParsedInstructions(updated);
+  };
+
+  const updateInstructionType = (index: number, type: 'BUSINESS_LOGIC_DEVELOPER_INSTRUCTIONS' | 'EXPERT_DEVELOPER_INSTRUCTIONS') => {
+    const updated = parsedInstructions.map((instruction, i) => 
+      i === index ? { ...instruction, type } : instruction
     );
     setParsedInstructions(updated);
   };
@@ -238,8 +251,22 @@ const ApplicabilityStep = ({ appState, setAppState, updateInstructions, onNext, 
                 </p>
               </div>
 
+              {/* Instruction Type Dropdown */}
+              <div className="mt-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Instruction Type
+                </label>
+                <select
+                  value={currentInstruction.type}
+                  onChange={(e) => updateInstructionType(currentInstructionIndex, e.target.value as 'BUSINESS_LOGIC_DEVELOPER_INSTRUCTIONS' | 'EXPERT_DEVELOPER_INSTRUCTIONS')}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                >
+                  <option value="BUSINESS_LOGIC_DEVELOPER_INSTRUCTIONS">Business Logic Developer Instructions</option>
+                  <option value="EXPERT_DEVELOPER_INSTRUCTIONS">Expert Developer Instructions</option>
+                </select>
+              </div>
+
               <div className="mt-3 text-xs text-gray-500">
-                <p><strong>Type:</strong> {currentInstruction.type}</p>
                 <p><strong>Labels:</strong> {currentInstruction.labels.join(', ')}</p>
               </div>
             </div>
